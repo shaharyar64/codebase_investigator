@@ -1,7 +1,7 @@
 "use client";
 
 import { Bot, User } from "lucide-react";
-import type * as React from "react";
+import * as React from "react";
 
 import { AuditPanel } from "@/components/audit/audit-panel";
 import { CitationList } from "@/components/chat/citation-list";
@@ -16,9 +16,26 @@ interface MessageListProps {
 }
 
 export function MessageList({ messages, isThinking }: MessageListProps) {
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) {
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  const showDetachedTyping =
+    isThinking &&
+    !messages.some((m) => m.role === "assistant" && m.isStreaming);
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      <ScrollArea className="min-h-0 flex-1 basis-0 overflow-y-auto">
+      <ScrollArea
+        ref={scrollRef}
+        className="min-h-0 flex-1 basis-0 overflow-y-auto"
+      >
         <div className="space-y-4 p-4 pb-2">
         {!messages.length ? (
           <div className="flex min-h-[min(40vh,20rem)] items-center justify-center py-12 text-center text-sm text-muted-foreground">
@@ -44,10 +61,30 @@ export function MessageList({ messages, isThinking }: MessageListProps) {
                   : "bg-card",
               )}
             >
-              <MarkdownContent
-                content={message.content}
-                variant={message.role === "user" ? "user" : "assistant"}
-              />
+              {message.role === "assistant" &&
+              message.isStreaming &&
+              !message.content ? (
+                <p className="text-sm text-muted-foreground">
+                  {message.streamPhase === "answering"
+                    ? "Drafting the answer…"
+                    : "Searching the repository…"}
+                </p>
+              ) : (
+                <div className="inline-block max-w-full">
+                  <MarkdownContent
+                    content={message.content}
+                    variant={message.role === "user" ? "user" : "assistant"}
+                  />
+                  {message.role === "assistant" &&
+                  message.isStreaming &&
+                  message.content ? (
+                    <span
+                      className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-primary align-middle"
+                      aria-hidden
+                    />
+                  ) : null}
+                </div>
+              )}
               {message.reasoning_summary ? (
                 <div className="border-l-2 border-muted-foreground/40 pl-3">
                   <MarkdownContent
@@ -57,15 +94,19 @@ export function MessageList({ messages, isThinking }: MessageListProps) {
                   />
                 </div>
               ) : null}
-              <CitationList citations={message.citations} />
-              {message.audit ? <AuditPanel audit={message.audit} /> : null}
+              {!message.isStreaming ? (
+                <>
+                  <CitationList citations={message.citations} />
+                  {message.audit ? <AuditPanel audit={message.audit} /> : null}
+                </>
+              ) : null}
             </div>
             {message.role === "user" ? (
               <Avatar icon={<User className="h-4 w-4" />} />
             ) : null}
           </div>
         ))}
-        {isThinking ? (
+        {showDetachedTyping ? (
           <div className="flex gap-3">
             <Avatar icon={<Bot className="h-4 w-4" />} />
             <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">

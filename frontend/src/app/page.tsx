@@ -6,8 +6,10 @@ import { BrainCircuit } from "lucide-react";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { RepositoryForm } from "@/components/repository/repository-form";
 import { RepositoryStatus } from "@/components/repository/repository-status";
-import { useAskQuestion, useSubmitRepository } from "@/hooks/use-investigator-api";
+import { useChatStreamAbort } from "@/hooks/use-chat-stream";
+import { useSubmitRepository } from "@/hooks/use-investigator-api";
 import { getErrorMessage } from "@/lib/errors";
+import { streamInvestigation } from "@/services/chat-stream";
 import type { ChatMessage, Repository } from "@/types/api";
 
 export default function Home() {
@@ -18,7 +20,8 @@ export default function Home() {
   const [chatError, setChatError] = React.useState<string | null>(null);
 
   const submitRepository = useSubmitRepository();
-  const askQuestion = useAskQuestion();
+  const { refreshController } = useChatStreamAbort();
+  const [isChatStreaming, setIsChatStreaming] = React.useState(false);
 
   async function handleRepositorySubmit(url: string) {
     setRepositoryError(null);
@@ -44,29 +47,92 @@ export default function Home() {
       content: question,
       citations: [],
     };
+    const assistantId = createId();
+    const assistantPlaceholder: ChatMessage = {
+      id: assistantId,
+      role: "assistant",
+      content: "",
+      citations: [],
+      isStreaming: true,
+      streamPhase: "searching",
+    };
     setChatError(null);
-    setMessages((current) => [...current, userMessage]);
+    setMessages((current) => [...current, userMessage, assistantPlaceholder]);
+
+    const controller = refreshController();
+    setIsChatStreaming(true);
+
+    const patchAssistant = (fn: (m: ChatMessage) => ChatMessage) => {
+      setMessages((current) =>
+        current.map((m) => (m.id === assistantId ? fn(m) : m)),
+      );
+    };
 
     try {
-      const response = await askQuestion.mutateAsync({
-        repository_id: repository.id,
-        question,
-        session_id: sessionId,
-      });
-      setSessionId(response.session_id);
-      setMessages((current) => [
-        ...current,
+      await streamInvestigation(
         {
-          id: createId(),
-          role: "assistant",
-          content: response.answer,
-          citations: response.citations,
-          audit: response.audit,
-          reasoning_summary: response.reasoning_summary,
+          repository_id: repository.id,
+          question,
+          session_id: sessionId,
         },
-      ]);
+        {
+          onSession: (data) => {
+            setSessionId(data.session_id);
+          },
+          onStatus: (data) => {
+            if (data.phase === "answering") {
+              patchAssistant((m) => ({
+                ...m,
+                streamPhase: "answering",
+              }));
+            }
+          },
+          onMessage: (data) => {
+            patchAssistant((m) => ({
+              ...m,
+              content: m.content + data.content,
+              streamPhase: undefined,
+            }));
+          },
+          onDone: (data) => {
+            setSessionId(data.session_id);
+            patchAssistant((m) => ({
+              ...m,
+              citations: data.citations,
+              audit: data.audit,
+              reasoning_summary: data.reasoning_summary,
+              isStreaming: false,
+              streamPhase: undefined,
+            }));
+          },
+          onError: (data) => {
+            setChatError(data.message);
+            patchAssistant((m) => ({
+              ...m,
+              isStreaming: false,
+              streamPhase: undefined,
+            }));
+          },
+        },
+        { signal: controller.signal },
+      );
     } catch (error) {
-      setChatError(getErrorMessage(error));
+      if (error instanceof DOMException && error.name === "AbortError") {
+        patchAssistant((m) => ({
+          ...m,
+          isStreaming: false,
+          streamPhase: undefined,
+        }));
+      } else {
+        setChatError(getErrorMessage(error));
+        patchAssistant((m) => ({
+          ...m,
+          isStreaming: false,
+          streamPhase: undefined,
+        }));
+      }
+    } finally {
+      setIsChatStreaming(false);
     }
   }
 
@@ -103,7 +169,7 @@ export default function Home() {
               className="flex-1"
               repository={repository}
               messages={messages}
-              isPending={askQuestion.isPending}
+              isPending={isChatStreaming}
               errorMessage={chatError}
               onAsk={handleAsk}
             />

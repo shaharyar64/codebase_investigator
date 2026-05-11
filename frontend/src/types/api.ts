@@ -57,6 +57,8 @@ export interface ChatResponse {
   reasoning_summary: string;
 }
 
+export type ChatStreamPhase = "searching" | "answering";
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -65,6 +67,10 @@ export interface ChatMessage {
   audit?: AuditResult | null;
   reasoning_summary?: string | null;
   created_at?: string;
+  /** Assistant message is receiving SSE chunks */
+  isStreaming?: boolean;
+  /** UI hint before first content token */
+  streamPhase?: ChatStreamPhase | null;
 }
 
 export interface SessionResponse {

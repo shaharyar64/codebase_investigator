@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
 from app.agents.prompts.investigator import (
+    INVESTIGATOR_METADATA_PROMPT,
     INVESTIGATOR_PROMPT,
+    INVESTIGATOR_STREAM_SYSTEM_PROMPT,
     SEARCH_PLANNER_PROMPT,
 )
 from app.core.config.settings import Settings
@@ -30,6 +34,15 @@ class InvestigationResult:
     inspected_files: list[str]
 
 
+@dataclass(frozen=True)
+class InvestigationEvidence:
+    """Search hits and file contexts gathered before answer generation."""
+
+    contexts: list[CodeContext]
+    search_terms: list[str]
+    inspected_files: list[str]
+
+
 class InvestigatorAgent:
     """Plan searches, inspect files, and generate grounded answers."""
 
@@ -44,14 +57,14 @@ class InvestigatorAgent:
         self._search_service = search_service
         self._settings = settings
 
-    async def answer_question(
+    async def collect_evidence(
         self,
         *,
         repository: Repository,
         question: str,
         history: list[ChatMessage],
-    ) -> InvestigationResult:
-        """Investigate a repository question and return a grounded answer."""
+    ) -> InvestigationEvidence:
+        """Plan searches, run ripgrep, and assemble code contexts."""
         file_system = FileSystemRepository(
             repository.local_path,
             max_file_bytes=self._settings.max_file_bytes,
@@ -82,23 +95,87 @@ class InvestigatorAgent:
                 max_contexts=max(0, self._settings.max_context_files - len(contexts)),
             )
         )
+        inspected_files = sorted({context.file for context in contexts})
+        return InvestigationEvidence(
+            contexts=contexts,
+            search_terms=search_terms,
+            inspected_files=inspected_files,
+        )
 
+    async def answer_question(
+        self,
+        *,
+        repository: Repository,
+        question: str,
+        history: list[ChatMessage],
+    ) -> InvestigationResult:
+        """Investigate a repository question and return a grounded answer."""
+        evidence = await self.collect_evidence(
+            repository=repository,
+            question=question,
+            history=history,
+        )
         answer_payload = await self._generate_answer(
             repository=repository,
             question=question,
             history=history,
-            contexts=contexts,
-            search_terms=search_terms,
+            contexts=evidence.contexts,
+            search_terms=evidence.search_terms,
         )
         citations = self._parse_citations(answer_payload.get("citations", []))
-        inspected_files = sorted({context.file for context in contexts})
         return InvestigationResult(
             answer=str(answer_payload.get("answer", "")).strip(),
             citations=citations,
             reasoning_summary=str(answer_payload.get("reasoning_summary", "")).strip(),
-            search_terms=search_terms,
-            inspected_files=inspected_files,
+            search_terms=evidence.search_terms,
+            inspected_files=evidence.inspected_files,
         )
+
+    async def stream_answer_markdown(
+        self,
+        *,
+        repository: Repository,
+        question: str,
+        history: list[ChatMessage],
+        evidence: InvestigationEvidence,
+    ) -> AsyncIterator[str]:
+        """Stream the Markdown investigation answer token-by-token."""
+        payload = {
+            "question": question,
+            "repository": self._repository_summary(repository),
+            "recent_history": self._history_for_prompt(history),
+            "search_terms": evidence.search_terms,
+            "code_contexts": [context.__dict__ for context in evidence.contexts],
+        }
+        user_message = json.dumps(payload, indent=2, ensure_ascii=False)
+        async for delta in self._ai_service.stream_chat_text(
+            system=INVESTIGATOR_STREAM_SYSTEM_PROMPT,
+            user=user_message,
+        ):
+            yield delta
+
+    async def extract_citations_and_summary(
+        self,
+        *,
+        question: str,
+        answer_markdown: str,
+        evidence: InvestigationEvidence,
+    ) -> tuple[list[Citation], str]:
+        """Derive structured citations and reasoning summary from streamed text."""
+        payload = {
+            "question": question,
+            "answer_markdown": answer_markdown,
+            "code_contexts": [context.__dict__ for context in evidence.contexts],
+        }
+        result = await self._ai_service.generate_json(
+            instructions=INVESTIGATOR_METADATA_PROMPT,
+            payload=payload,
+            schema_name="investigation_metadata",
+            schema=self._metadata_schema(),
+        )
+        citations = self._parse_citations(result.get("citations", []))
+        reasoning = str(result.get("reasoning_summary", "")).strip()
+        return citations, reasoning
 
     async def _plan_searches(
         self,
@@ -246,6 +323,28 @@ class InvestigatorAgent:
             ],
         }
 
+    def _metadata_schema(self) -> dict[str, Any]:
+        citation_schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "file": {"type": "string"},
+                "start_line": {"type": "integer", "minimum": 1},
+                "end_line": {"type": "integer", "minimum": 1},
+                "excerpt": {"type": ["string", "null"]},
+            },
+            "required": ["file", "start_line", "end_line", "excerpt"],
+        }
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "citations": {"type": "array", "items": citation_schema},
+                "reasoning_summary": {"type": "string"},
+            },
+            "required": ["citations", "reasoning_summary"],
+        }
+
     def _answer_schema(self) -> dict[str, Any]:
         citation_schema = {
             "type": "object",
@@ -268,4 +367,3 @@ class InvestigatorAgent:
             },
             "required": ["answer", "citations", "reasoning_summary"],
         }
-

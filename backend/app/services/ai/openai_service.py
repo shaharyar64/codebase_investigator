@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncIterator
 from typing import Any
 
 try:
@@ -75,6 +76,48 @@ class OpenAIService:
             raise AIServiceException("OpenAI API request failed.") from exc
 
         return self._parse_json(raw_text)
+
+    async def stream_chat_text(
+        self,
+        *,
+        system: str,
+        user: str,
+        model: str | None = None,
+    ) -> AsyncIterator[str]:
+        """Stream assistant text deltas from the Chat Completions API."""
+        if self._client is None:
+            raise AIServiceException("The openai package is not installed.")
+        if not self._settings.openai_api_key:
+            raise AIServiceException(
+                "OPENAI_API_KEY is not configured.",
+                status_code=503,
+            )
+
+        selected_model = model or self._settings.openai_model
+
+        try:
+            stream = await self._client.chat.completions.create(
+                model=selected_model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                stream=True,
+            )
+        except APIError as exc:
+            logger.exception("OpenAI streaming API error")
+            raise AIServiceException("OpenAI API request failed.") from exc
+
+        async for chunk in stream:
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            delta = getattr(choices[0], "delta", None)
+            if delta is None:
+                continue
+            piece = getattr(delta, "content", None)
+            if piece:
+                yield str(piece)
 
     def _build_client(self, settings: Settings):  # type: ignore[no-untyped-def]
         if AsyncOpenAI is None:
