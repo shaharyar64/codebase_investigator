@@ -71,8 +71,8 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-background">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 p-4 lg:p-6">
+    <main className="flex min-h-screen flex-col bg-background">
+      <div className="mx-auto flex w-full max-w-7xl flex-1 min-h-0 flex-col gap-4 p-4 lg:p-6">
         <header className="flex items-center justify-between gap-4 rounded-lg border bg-card px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
@@ -89,8 +89,8 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-          <aside className="space-y-4">
+        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)] lg:items-stretch">
+          <aside className="space-y-4 lg:min-h-0">
             <RepositoryForm
               isPending={submitRepository.isPending}
               errorMessage={repositoryError}
@@ -98,13 +98,16 @@ export default function Home() {
             />
             <RepositoryStatus repository={repository} />
           </aside>
-          <ChatPanel
-            repository={repository}
-            messages={messages}
-            isPending={askQuestion.isPending}
-            errorMessage={chatError}
-            onAsk={handleAsk}
-          />
+          <div className="flex min-h-0 min-w-0 flex-col">
+            <ChatPanel
+              className="flex-1"
+              repository={repository}
+              messages={messages}
+              isPending={askQuestion.isPending}
+              errorMessage={chatError}
+              onAsk={handleAsk}
+            />
+          </div>
         </div>
       </div>
     </main>

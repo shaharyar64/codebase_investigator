@@ -5,6 +5,7 @@ import type * as React from "react";
 
 import { AuditPanel } from "@/components/audit/audit-panel";
 import { CitationList } from "@/components/chat/citation-list";
+import { MarkdownContent } from "@/components/chat/markdown-content";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { ChatMessage } from "@/types/api";
 import { cn } from "@/lib/utils";
@@ -16,10 +17,11 @@ interface MessageListProps {
 
 export function MessageList({ messages, isThinking }: MessageListProps) {
   return (
-    <ScrollArea className="h-full">
-      <div className="space-y-4 p-4">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+      <ScrollArea className="min-h-0 flex-1 basis-0 overflow-y-auto">
+        <div className="space-y-4 p-4 pb-2">
         {!messages.length ? (
-          <div className="flex h-[420px] items-center justify-center text-sm text-muted-foreground">
+          <div className="flex min-h-[min(40vh,20rem)] items-center justify-center py-12 text-center text-sm text-muted-foreground">
             Select a repository to start.
           </div>
         ) : null}
@@ -42,11 +44,18 @@ export function MessageList({ messages, isThinking }: MessageListProps) {
                   : "bg-card",
               )}
             >
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              <MarkdownContent
+                content={message.content}
+                variant={message.role === "user" ? "user" : "assistant"}
+              />
               {message.reasoning_summary ? (
-                <p className="border-l-2 pl-3 text-xs text-muted-foreground">
-                  {message.reasoning_summary}
-                </p>
+                <div className="border-l-2 border-muted-foreground/40 pl-3">
+                  <MarkdownContent
+                    content={message.reasoning_summary}
+                    variant="assistant"
+                    className="text-xs text-muted-foreground prose-p:my-1 prose-headings:my-2"
+                  />
+                </div>
               ) : null}
               <CitationList citations={message.citations} />
               {message.audit ? <AuditPanel audit={message.audit} /> : null}
@@ -64,8 +73,9 @@ export function MessageList({ messages, isThinking }: MessageListProps) {
             </div>
           </div>
         ) : null}
-      </div>
-    </ScrollArea>
+        </div>
+      </ScrollArea>
+    </div>
   );
 }
 

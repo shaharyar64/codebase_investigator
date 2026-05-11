@@ -5,6 +5,7 @@ import { MessageSquareText } from "lucide-react";
 import { ChatInput } from "@/components/chat/chat-input";
 import { MessageList } from "@/components/chat/message-list";
 import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import type { ChatMessage, Repository } from "@/types/api";
 
 interface ChatPanelProps {
@@ -13,6 +14,7 @@ interface ChatPanelProps {
   isPending: boolean;
   errorMessage?: string | null;
   onAsk: (question: string) => Promise<void>;
+  className?: string;
 }
 
 export function ChatPanel({
@@ -21,12 +23,18 @@ export function ChatPanel({
   isPending,
   errorMessage,
   onAsk,
+  className,
 }: ChatPanelProps) {
   const disabled = !repository || repository.status !== "ready";
 
   return (
-    <Card className="flex min-h-[720px] flex-1 flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b p-4">
+    <Card
+      className={cn(
+        "flex h-full min-h-0 flex-1 flex-col overflow-hidden min-h-[28rem] lg:min-h-[calc(100vh-7.5rem)]",
+        className,
+      )}
+    >
+      <div className="flex shrink-0 items-center justify-between border-b p-4">
         <div className="flex min-w-0 items-center gap-2">
           <MessageSquareText className="h-5 w-5 shrink-0 text-muted-foreground" />
           <div className="min-w-0">
@@ -42,10 +50,12 @@ export function ChatPanel({
           </p>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
         <MessageList messages={messages} isThinking={isPending} />
       </div>
-      <ChatInput disabled={disabled} isPending={isPending} onSubmit={onAsk} />
+      <div className="shrink-0">
+        <ChatInput disabled={disabled} isPending={isPending} onSubmit={onAsk} />
+      </div>
     </Card>
   );
 }
